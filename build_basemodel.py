@@ -10,12 +10,14 @@ __author__ = 'Grace Ng'
 connectome_file = 'W.hdf5'
 process_path_data_file = 'process_path_data.hdf5'
 perf_metric = 'corr' # or 'dist'
+perf_eval_dim = 'regions' #'times' or 'regions'; the dimension along which performance is evaluated
 group_list = ['NTG'] # list of groups to consider, e.g. ['G20', 'NTG'] or 'all'
 ROI = 'R CPu'
-c_range_type = 'lin' #'log'
-c_range = (0.01, 10.) # the range of c values that will be tested to find the best-fitting model
-#c_range = (-3., 2.)
-num_c = 100 # the number of c values to test
+c_range_type = 'lin' #'lin' or 'log'
+# the range of c values that will be tested to find the best-fitting model. Note that if the range type is 'log',
+# then these values will be used for  10^x
+c_range = (0.01, 10.) #(-6., 1.7)
+num_c = 500 # the number of c values to test
 verbose = True
 plot = True
 
@@ -51,6 +53,7 @@ for group in process_path_data:
 
 Xo = mdl_fxns.make_Xo(ROI, ROI_names)
 L_out = mdl_fxns.get_L_out(W) # generate weighted out-degree Laplacian matrix
+
 c = {} # store the fit constant for each time point in this dictionary
 perf = {} # data from the performance metric used to evaluate best fit
 predicts = {}
@@ -58,16 +61,17 @@ c_per_time = {}
 
 for group in mean_data:
     times = list(process_path_data[group].keys())
-    best_c, best_perf, best_predict, best_c_per_time, all_perf = mdl_fxns.fit(Xo, L_out, times, np.array(mean_data[group]), \
-                                                                    c_range_type, c_range, num_c, perf_metric, plot=True)
+    best_c, best_perf, best_predict, best_c_per_ctgry = mdl_fxns.fit(Xo, L_out, times, ROI_names,
+                                                                     np.array(mean_data[group]), c_range_type, c_range,
+                                                                     num_c, perf_metric, perf_eval_dim, plot=True)
     c[group] = best_c
     perf[group] = best_perf
     predicts[group] = best_predict
-    c_per_time[group] = best_c_per_time
+    c_per_time[group] = best_c_per_ctgry
     if verbose:
         print('Best c: ', best_c)
         print('Best performance score (', perf_metric, '): ', best_perf)
-        print('Best c values for each time point: ', best_c_per_time)
+        print('Best c values for each time point: ', best_c_per_ctgry)
 
 #TODO: figure out if there is a better way of evaluating c instead of just averaging across time points
 
