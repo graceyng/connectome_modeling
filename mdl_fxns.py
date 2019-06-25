@@ -1,7 +1,7 @@
 import numpy as np
 import h5py
 from scipy.linalg import expm
-from scipy.stats import pearsonr
+from scipy.stats import pearsonr, linregress
 import plot_fxns
 
 __author__ = 'Grace Ng'
@@ -26,10 +26,10 @@ def get_L_out(W):
     """
     np.fill_diagonal(W, 0.) # zero out the diagonal since regions should not be connected to themselves
     eigvals = np.linalg.eigvals(W)
-    real_eigvals = eigvals[np.isreal(eigvals)]
-    if len(real_eigvals) == 0:
-        raise Exception('The adjacency matrix does not have any real eigenvalues.')
-    W = W / max(real_eigvals).real  # must normalize the adjacency matrix so that the largest eigenvalue is 1
+    #real_eigvals = eigvals[np.isreal(eigvals)] #TODO: look into ignoring the imaginary components and taking the max of all
+    #if len(real_eigvals) == 0:
+    #    raise Exception('The adjacency matrix does not have any real eigenvalues.')
+    W = W / max(eigvals).real  # must normalize the adjacency matrix so that the largest eigenvalue is 1
     out_deg = np.sum(W, axis=1)
     return np.diag(out_deg) - W
 
@@ -50,7 +50,13 @@ def get_perf(predicted, actual, perf_metric):
             return None
         return pearsonr(predicted, actual)[0]
     elif perf_metric == 'dist':
-        x = 1 #TODO: fill this in
+        #slope, intercept, r_value, p_value, std_err = linregress(predicted, actual)
+        #adj_predicted = slope*predicted + intercept
+
+        # calculate the Euclidean distance between the predicted and actual data, and then divide by the dimensionality
+        # of the data (the dimensionality of the data may vary between calls to this function)
+        return np.linalg.norm(predicted - actual) / predicted.size
+
     else:
         raise Exception('perf_metric should either be "corr" or "dist".')
 
@@ -98,8 +104,19 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
         qual_idxs = np.where(qual_mat[:,j])[0]
         if qual_idxs.size > 0:
             np.log(all_predicts[qual_idxs,:,j])
+    if perf_metric == 'dist':
+        swapped = np.swapaxes(all_predicts, 1, 0)
+        all_slopes, all_intercepts = [], []
+        for i in range(swapped.shape[0]):
+            slope, intercept, r_value, p_value, std_err = linregress(swapped[i][qual_mat], data[qual_mat])
+            all_slopes.append(slope)
+            all_intercepts.append(intercept)
+        all_predicts = np.add(np.dot(swapped, slope), np.array(all_intercepts).reshape(len(all_intercepts),1,1))
+        all_predicts = np.swapaxes(all_predicts, 1, 0)
 
     # evaluate model performance according to the performance metric
+    dims = [] # dimensions along which performance is evaluated
+    perf_idxs = []
     if perf_eval_dim == 'times':  # take the mean performance across time points, giving mean performance for each
         for i in range(data.shape[0]):
             qual_idxs = np.where(qual_mat[i])[0]
@@ -107,6 +124,8 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
                                        perf_metric)
             if not None in perf:
                 all_perf.append(perf)
+                dims.append(times[i])
+                perf_idxs.append(i)
     elif perf_eval_dim == 'regions':  # take the mean performance across regions
         for j in range(data.shape[1]):
             qual_idxs = np.where(qual_mat[:,j])[0]
@@ -114,28 +133,49 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
                                        perf_metric)
             if not None in perf:
                 all_perf.append(perf)
+                dims.append(regions[j])
+                perf_idxs.append(j)
     else:
         raise Exception('perf_mean_type must be either "times" or "regions".')
     gen_perf = np.mean(np.array(all_perf), axis=0) # vector with the mean performance score for each of the c values
     if plot:
-        plot_fxns.plot_perf_vs_c(times, all_c, all_perf, perf_metric)
+        plot_fxns.plot_perf_vs_c(perf_eval_dim, dims, all_c, all_perf, perf_metric)
 
     # if performance metric is correlation, find the c value that gives the highest mean performance score
     if perf_metric == 'corr':
-        best_gen_c = all_c[np.argmax(gen_perf)]
-        best_perf = np.max(gen_perf)
-        best_predict = np.array(all_predicts)[:,np.argmax(gen_perf)]
+        best_c_idx = np.argmax(gen_perf)
         best_c_per_ctgry = all_c[np.argmax(all_perf, axis=1)]
     # if performance metric is distance, find the c value that gives the lowest mean performance score
     elif perf_metric == 'dist':
-        best_gen_c = all_c[np.argmin(gen_perf)]
-        best_perf = np.min(gen_perf)
-        best_predict = np.array(all_predicts)[:,np.argmin(gen_perf)]
+        best_c_idx = np.argmin(gen_perf)
         best_c_per_ctgry = all_c[np.argmin(all_perf, axis=1)]
     else:
         raise Exception('perf_metric must either be "corr" or "dist".')
+    best_gen_c = all_c[best_c_idx]
+    best_predict = np.array(all_predicts)[:, best_c_idx]
+    best_perf = gen_perf[best_c_idx]
     if plot:
-        plot_fxns.plot_logpredict_vs_logdata(times, regions, best_predict, data, qual_mat, perf_eval_dim, best_gen_c)
+        if perf_eval_dim == 'times':
+            all_idxs = np.array(range(len(times)))
+        elif perf_eval_dim == 'regions':
+            all_idxs = np.array(range(len(regions)))
+        else:
+            raise Exception('perf_eval_dim must either be "times" or "regions".')
+        plot_fxns.plot_predict_vs_data(times, regions, all_idxs, best_predict, data, qual_mat, perf_eval_dim, best_gen_c)
+        if len(perf_idxs) > 10:
+            best_5_idxs = np.argpartition(np.array(all_perf)[:,best_c_idx], -5)[-5:]
+            worst_5_idxs = np.argpartition(np.array(all_perf)[:,best_c_idx], 5)[:5]
+            plot_fxns.plot_perf_vs_c(perf_eval_dim, np.array(dims)[best_5_idxs], all_c,
+                                     np.array(all_perf)[best_5_idxs],
+                                     perf_metric, 'Performance in the 5 Best Dimensions')
+            plot_fxns.plot_perf_vs_c(perf_eval_dim, np.array(dims)[worst_5_idxs], all_c,
+                                     np.array(all_perf)[worst_5_idxs],
+                                     perf_metric, 'Performance in the 5 Worst Dimensions')
+            plot_fxns.plot_predict_vs_data(times, regions, np.array(perf_idxs)[best_5_idxs], best_predict,
+                                           data, qual_mat, perf_eval_dim, best_gen_c, title='5 Best Dimensions')
+            plot_fxns.plot_predict_vs_data(times, regions, worst_5_idxs, best_predict, data, qual_mat, perf_eval_dim,
+                                           best_gen_c, title='5 Worst Dimensions')
+
     if save is not None:
         save_mdl_results(save, times, regions, perf_metric, perf_eval_dim, data, qual_mat, all_c, np.array(all_perf),
                          gen_perf, best_gen_c)
