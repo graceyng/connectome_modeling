@@ -29,11 +29,11 @@ def get_L_out(W):
     #real_eigvals = eigvals[np.isreal(eigvals)] #TODO: look into ignoring the imaginary components and taking the max of all
     #if len(real_eigvals) == 0:
     #    raise Exception('The adjacency matrix does not have any real eigenvalues.')
-    W = W / max(eigvals).real  # must normalize the adjacency matrix so that the largest eigenvalue is 1
+    W = W / max(eigvals.real)  # must normalize the adjacency matrix so that the largest eigenvalue is 1
     out_deg = np.sum(W, axis=1)
     return np.diag(out_deg) - W
 
-def get_perf(predicted, actual, perf_metric):
+def get_perf(predicted, actual, perf_metric, log=True):
     """
 
     :param predicted:
@@ -41,22 +41,25 @@ def get_perf(predicted, actual, perf_metric):
     :param perf_metric:
     :return:
     """
+    if log:
+        func = lambda x: x > 0. and not np.isnan(x)
+        qual_idxs = np.where(np.vectorize(func)(predicted))[0]
+        if qual_idxs.size < 2:
+            return np.nan
+        actual = np.log(actual[qual_idxs])
+        predicted = np.log(predicted[qual_idxs])
     if perf_metric == 'corr':
         # need a minimum of three points to calculate a meaningful Pearson correlation, and the Pearson correlation is
         # undefined if the std dev of either dataset is 0
         if predicted.size <=2:
-            return None
+            return np.nan
         elif np.std(predicted) == 0. or np.std(actual) == 0.:
-            return None
+            return np.nan
         return pearsonr(predicted, actual)[0]
     elif perf_metric == 'dist':
-        #slope, intercept, r_value, p_value, std_err = linregress(predicted, actual)
-        #adj_predicted = slope*predicted + intercept
-
         # calculate the Euclidean distance between the predicted and actual data, and then divide by the dimensionality
         # of the data (the dimensionality of the data may vary between calls to this function)
         return np.linalg.norm(predicted - actual) / predicted.size
-
     else:
         raise Exception('perf_metric should either be "corr" or "dist".')
 
@@ -97,22 +100,15 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
         # propagate the model according to the tested values of c to generate predicted pathology values
         all_predicts.append(np.array([predict(Xo, L_out, c, time) for c in all_c]))
     all_predicts = np.array(all_predicts)
-    # used to find the indices of regions where pathology data is not 0 or nan so that we can take the log afterward
-    func = lambda x: x != 0. and not np.isnan(x)
-    qual_mat = np.vectorize(func)(data) # matrix with True if element satisfies the above conditions, and False otherwise
-    for j in range(data.shape[1]):
-        qual_idxs = np.where(qual_mat[:,j])[0]
-        if qual_idxs.size > 0:
-            np.log(all_predicts[qual_idxs,:,j])
+    # func used to find the indices of regions where pathology data is not 0 or nan so that we can take the log afterward
+    func = lambda x: x > 0. and not np.isnan(x)
+    qual_mat = np.vectorize(func)(data) # matrix has True if element satisfies the above conditions, and False otherwise
     if perf_metric == 'dist':
-        swapped = np.swapaxes(all_predicts, 1, 0)
-        all_slopes, all_intercepts = [], []
-        for i in range(swapped.shape[0]):
-            slope, intercept, r_value, p_value, std_err = linregress(swapped[i][qual_mat], data[qual_mat])
-            all_slopes.append(slope)
-            all_intercepts.append(intercept)
-        all_predicts = np.add(np.dot(swapped, slope), np.array(all_intercepts).reshape(len(all_intercepts),1,1))
-        all_predicts = np.swapaxes(all_predicts, 1, 0)
+        swapped_predicts = np.swapaxes(all_predicts, 1, 2)
+        flat_predicts = swapped_predicts[qual_mat].flatten('F')
+        flat_data = np.tile(data[qual_mat],num_c)
+        slope, intercept, r_value, p_value, std_err = linregress(flat_predicts, flat_data)
+        all_predicts = slope * all_predicts + intercept
 
     # evaluate model performance according to the performance metric
     dims = [] # dimensions along which performance is evaluated
@@ -120,35 +116,37 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
     if perf_eval_dim == 'times':  # take the mean performance across time points, giving mean performance for each
         for i in range(data.shape[0]):
             qual_idxs = np.where(qual_mat[i])[0]
-            perf = np.apply_along_axis(get_perf, 0, np.log(all_predicts[i,:,qual_idxs]), np.log(data[i,qual_idxs]),
-                                       perf_metric)
-            if not None in perf:
-                all_perf.append(perf)
-                dims.append(times[i])
-                perf_idxs.append(i)
+            if qual_idxs.size > 0:
+                perf = np.apply_along_axis(get_perf, 0, all_predicts[i,:,qual_idxs], data[i,qual_idxs], perf_metric)
+                if np.where(np.isnan(perf))[0].size <= perf.size/2.:
+                    all_perf.append(perf)
+                    dims.append(times[i])
+                    perf_idxs.append(i)
     elif perf_eval_dim == 'regions':  # take the mean performance across regions
         for j in range(data.shape[1]):
             qual_idxs = np.where(qual_mat[:,j])[0]
-            perf = np.apply_along_axis(get_perf, 0, np.log(all_predicts[qual_idxs,:,j]), np.log(data[qual_idxs,j]),
-                                       perf_metric)
-            if not None in perf:
-                all_perf.append(perf)
-                dims.append(regions[j])
-                perf_idxs.append(j)
+            if qual_idxs.size > 0:
+                perf = np.apply_along_axis(get_perf, 0, all_predicts[qual_idxs,:,j], data[qual_idxs,j], perf_metric)
+                if np.where(np.isnan(perf))[0].size <= perf.size/2.:
+                    all_perf.append(perf)
+                    dims.append(regions[j])
+                    perf_idxs.append(j)
     else:
         raise Exception('perf_mean_type must be either "times" or "regions".')
-    gen_perf = np.mean(np.array(all_perf), axis=0) # vector with the mean performance score for each of the c values
+    gen_perf = np.nanmean(np.array(all_perf), axis=0) # vector with the mean performance score for each of the c values
+    if np.all(np.isnan(gen_perf)):
+        raise Exception('All c values resulted in performance values that are not a number.')
     if plot:
         plot_fxns.plot_perf_vs_c(perf_eval_dim, dims, all_c, all_perf, perf_metric)
 
     # if performance metric is correlation, find the c value that gives the highest mean performance score
     if perf_metric == 'corr':
-        best_c_idx = np.argmax(gen_perf)
-        best_c_per_ctgry = all_c[np.argmax(all_perf, axis=1)]
+        best_c_idx = np.nanargmax(gen_perf)
+        best_c_per_ctgry = all_c[np.nanargmax(all_perf, axis=1)]
     # if performance metric is distance, find the c value that gives the lowest mean performance score
     elif perf_metric == 'dist':
-        best_c_idx = np.argmin(gen_perf)
-        best_c_per_ctgry = all_c[np.argmin(all_perf, axis=1)]
+        best_c_idx = np.nanargmin(gen_perf)
+        best_c_per_ctgry = all_c[np.nanargmin(all_perf, axis=1)]
     else:
         raise Exception('perf_metric must either be "corr" or "dist".')
     best_gen_c = all_c[best_c_idx]

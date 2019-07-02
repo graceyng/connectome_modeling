@@ -65,6 +65,7 @@ with h5py.File(process_path_data_file, 'w') as f:
 W_upper = np.concatenate((connIpsi_df.iloc[:,1:].to_numpy(), connContra_df.iloc[:,1:].to_numpy()), axis=1)
 W_lower = np.concatenate((connContra_df.iloc[:,1:].to_numpy(), connIpsi_df.iloc[:,1:].to_numpy()), axis=1)
 W = np.concatenate((W_upper, W_lower), axis=0)
+
 with h5py.File(connectome_file, 'w') as f:
     dset = f.create_dataset('W', data=W)
     dset.attrs['Ipsi_Regions'] = connIpsi_regions

@@ -19,10 +19,12 @@ def plot_perf_vs_c(dim_type, dims, all_c, all_perf, perf_metric, title=None):
 def plot_predict_vs_data(times, regions, idxs, best_predict, data, qual_mat, perf_eval_dim, best_gen_c, log=True,
                          title=None):
     plt.figure()
+    func = lambda x: x > 0. and not np.isnan(x)
     if perf_eval_dim == 'times':  # take the mean performance across time points, giving mean performance for each
         for i in idxs:
             qual_idxs = np.where(qual_mat[i])[0]
             if log:
+                qual_idxs = np.intersect1d(qual_idxs, np.where(np.vectorize(func)(best_predict[i]))[0])
                 predict_plot = np.log(best_predict[i,qual_idxs])
                 data_plot = np.log(data[i,qual_idxs])
             else:
@@ -33,6 +35,7 @@ def plot_predict_vs_data(times, regions, idxs, best_predict, data, qual_mat, per
         for j in idxs:
             qual_idxs = np.where(qual_mat[:,j])[0]
             if log:
+                qual_idxs = np.intersect1d(qual_idxs, np.where(np.vectorize(func)(best_predict[:,j]))[0])
                 predict_plot = np.log(best_predict[qual_idxs,j])
                 data_plot = np.log(data[qual_idxs,j])
             else:
