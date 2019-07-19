@@ -72,31 +72,3 @@ for group in mean_data:
     all_c, all_perf, all_predicts, dims, best_c, best_perf, best_predict, best_c_per_ctgry, linregress_params = \
         mdl_fxns.fit(Xo, L_out, times, regions, np.array(mean_data[group]), c_range_type, c_range, num_c, perf_metric,
                      perf_eval_dim, log_shift, do_linregress, plot=True)
-    
-    if cluster_analysis == 'check silhouettes':
-        mdl_fxns.silhouette_cluster_bestperf_bestc(perf_eval_dim, all_c, all_perf, perf_metric)
-    elif cluster_analysis == 'plot clusters only' and all_perf.shape[0] >= n_clusters:
-        labels, points = mdl_fxns.cluster_bestperf_bestc(perf_eval_dim, dims, all_c, all_perf, perf_metric, n_clusters,
-                                                         plot=True)
-    elif cluster_analysis == 'plot clusters and timecourses' and all_perf.shape[0] >= n_clusters:
-        labels, points = mdl_fxns.cluster_bestperf_bestc(perf_eval_dim, dims, all_c, all_perf, perf_metric, n_clusters,
-                                                         plot=True)
-        idxs = np.where(labels == cluster_to_analyze)[0]
-        #idxs = np.where(points[:,1] < 0)[0]
-        for idx in idxs:
-            region_to_plot = dims[idx]
-            plot_fxns.plot_predict_vs_actual_timecourse(times, regions, region_to_plot, np.array(mean_data[group]),
-                                                        mdl_fxns.predict, Xo, L_out, points[idx][0], points[idx][1],
-                                                        log_shift=log_shift)
-    c[group] = best_c
-    perf[group] = best_perf
-    predicts[group] = best_predict
-    c_per_ctgry[group] = best_c_per_ctgry
-    if verbose:
-        print('Best c: ', best_c)
-        print('Best performance score (', perf_metric, '): ', best_perf)
-        print('Best c values for each category: ', best_c_per_ctgry)
-
-    plot_fxns.plot_predict_vs_actual_timecourse(times, regions, seed_region, np.array(mean_data[group]),
-                                                mdl_fxns.predict, Xo, L_out, best_c, best_perf, log_shift=log_shift,
-                                                linregress_params=linregress_params)
