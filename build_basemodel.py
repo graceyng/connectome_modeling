@@ -8,23 +8,23 @@ __author__ = 'Grace Ng'
 #####
 # Parameters
 #####
-connectome_file = 'retro_firstord_W.hdf5' #'W.hdf5'
+connectome_file = 'W.hdf5' #'retro_firstord_W.hdf5'
 process_path_data_file = 'process_path_data.hdf5'
-perf_metric = 'dist' # 'corr' or 'dist'
-perf_eval_dim = 'regions' #'times' or 'regions'; the dimension along which performance is evaluated
-log_shift = "shift"
+perf_metric = 'corr' # 'corr' or 'dist'
+perf_eval_dim = 'times' #'times' or 'regions'; the dimension along which performance is evaluated
+log_shift = "no shift" #'no shift' or 'shift' or 'no log'
 do_linregress = True
 group_list = ['NTG'] # list of groups to consider, e.g. ['G20', 'NTG'] or 'all'
 seed_region = 'R CPu'
-c_range_type = 'log' #'lin' or 'log'
+c_range_type = 'lin' #'lin' or 'log'
 # the range of c values that will be tested to find the best-fitting model. Note that if the range type is 'log',
 # then these values will be used for  10^x
-#c_range = (0.0001, 10.)
-c_range = (-5., 1.)
+c_range = (0.001, 10.)
+#c_range = (-5., 1.)
 num_c = 100 # the number of c values to test
 verbose = True
 plot = True
-cluster_analysis = 'check silhouettes' #'check silhouettes', 'plot clusters only', 'plot clusters and timecourses', 'None'
+cluster_analysis = 'plot clusters only' #'check silhouettes', 'plot clusters only', 'plot clusters and timecourses', 'None'
 n_clusters = 3 #get this value by finding the cluster number with the maximum silhouette value
 cluster_to_analyze = 0
 

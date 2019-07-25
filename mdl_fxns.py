@@ -145,7 +145,9 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
                     perf_idxs.append(j)
     else:
         raise Exception('perf_mean_type must be either "times" or "regions".')
-    gen_perf = np.nanmean(np.array(all_perf), axis=0) # vector with the mean performance score for each of the c values
+    all_perf = np.array(all_perf)
+    qual_idxs = np.where(~(~np.isfinite(all_perf)).all(axis=0))[0]
+    gen_perf = np.nanmean(all_perf[:,qual_idxs], axis=0) # vector with the mean performance score for each of the c values
     if np.all(np.isnan(gen_perf)):
         raise Exception('All c values resulted in performance values that are not a number.')
     if plot:
@@ -157,17 +159,18 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
 
     # if performance metric is correlation, find the c value that gives the highest mean performance score
     if perf_metric == 'corr':
-        best_c_idx = np.nanargmax(gen_perf)
+        best_perf = np.nanmax(gen_perf)
+        best_c_idx = qual_idxs[np.nanargmax(gen_perf)]
         best_c_per_ctgry = all_c[np.nanargmax(all_perf, axis=1)]
     # if performance metric is distance, find the c value that gives the lowest mean performance score
     elif perf_metric == 'dist':
-        best_c_idx = np.nanargmin(gen_perf)
+        best_perf = np.nanmin(gen_perf)
+        best_c_idx = qual_idxs[np.nanargmin(gen_perf)]
         best_c_per_ctgry = all_c[np.nanargmin(all_perf, axis=1)]
     else:
         raise Exception('perf_metric must either be "corr" or "dist".')
     best_gen_c = all_c[best_c_idx]
     best_predict = np.array(all_predicts)[:, best_c_idx]
-    best_perf = gen_perf[best_c_idx]
     if plot:
         if perf_eval_dim == 'times':
             all_idxs = np.array(range(len(times)))
@@ -196,6 +199,10 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
                                            title='5 Best Dimensions')
             plot_fxns.plot_predict_vs_data(times, regions, worst_5_idxs, best_predict, data, qual_mat, perf_eval_dim,
                                            best_gen_c, log_shift, title='5 Worst Dimensions')
+            for idx in np.concatenate((best_5_idxs, worst_5_idxs)):
+                plot_fxns.plot_predict_vs_actual_timecourse(times, regions, np.array(dims)[idx], data, predict, Xo,
+                                                            L_out, best_gen_c, best_perf, log_shift=log_shift,
+                                                            linregress_params=linregress_params)
 
     if save is not None:
         save_mdl_results(save, times, regions, perf_metric, perf_eval_dim, data, qual_mat, all_c, np.array(all_perf),
@@ -235,13 +242,13 @@ def load_mdl_results(save_file):
 
 def get_bestperf_bestc_pairs(all_c, all_perf, perf_metric):
     if perf_metric == "corr":
-        max_c_idxs = np.argmax(all_perf, axis=1)
+        best_c_idxs = np.nanargmax(all_perf, axis=1)
     elif perf_metric == "dist":
-        max_c_idxs = np.argmin(all_perf, axis=1)
+        best_c_idxs = np.nanargmin(all_perf, axis=1)
     else:
         raise Exception('perf_metric should either be "corr" or "dist".')
-    best_c = all_c[max_c_idxs]
-    best_perf = np.array([all_perf[i,max_c_idxs[i]] for i in range(all_perf.shape[0])])
+    best_c = all_c[best_c_idxs]
+    best_perf = np.array([all_perf[i,best_c_idxs[i]] for i in range(all_perf.shape[0])])
     return np.array([[best_c[i], best_perf[i]] for i in range(best_c.size)])
 
 def silhouette_cluster_bestperf_bestc(perf_eval_dim, all_c, all_perf, perf_metric, n_range=list(range(2,8))):
