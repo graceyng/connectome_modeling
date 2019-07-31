@@ -13,16 +13,17 @@ __author__ = 'Grace Ng'
 conn_types = ['base', 'firstord']
 connectome_files = {'base': 'W.hdf5', 'firstord': 'retro_firstord_W.hdf5'}
 process_path_data_file = 'process_path_data.hdf5'
+output_file = None
 perf_metric = 'corr' # 'corr' or 'dist'
 bootstrap = 50 # None or integer of the number of bootstrapped samples to generate
-n_threshold = 20
-perf_eval_dim = 'regions' #'times' or 'regions'; the dimension along which performance is evaluated
+n_threshold = 1
+perf_eval_dim = 'times' #'times' or 'regions'; the dimension along which performance is evaluated
 log_shift = "no shift" #'no shift' or 'shift' or 'no log'
 group = 'NTG' # list of groups to consider, e.g. ['G20', 'NTG'] or 'all'
 seed_region = 'R CPu'
 c_params = {'base': {'c range type': 'lin', 'c range': (0.001, 10.), 'num c': 100},
             'firstord': {'c range type': 'log', 'c range': (-5., 1.), 'num c': 100}}
-do_linregress = True
+do_linregress = False
 verbose = True
 plot = True
 
@@ -69,7 +70,9 @@ for time in process_path_data[group]:
 Xo = mdl_fxns.make_Xo(seed_region, regions)
 L_out = {}
 for conn_type in conn_types:
-    L_out[conn_type] = mdl_fxns.get_L_out(W[conn_type]) # generate weighted out-degree Laplacian matrix
+    L_out[conn_type] = mdl_fxns.get_L_out(W[conn_type], normalize=False) # generate weighted out-degree Laplacian matrix
+                                #Note that normalization of the W matrix must be excluded when computing L_out because
+                                #eigenvalues of the first-order W matrix are 0.
 
 times = np.array(list(process_path_data[group].keys()))
 if perf_eval_dim == 'times':
@@ -123,40 +126,41 @@ for conn_type in conn_types:
         plot_params[conn_type] = {'mean': full_mean, 'err': (neg_err, pos_err)}
         dims[conn_type].append(np.array(this_dims))
 
-#Run a student's t-test, where...
-#   for correlation, Ho: firstord >= base and Ha: firstord < base
-#   for distance, Ho: base >= firstord and Ha: base < firstord
-all_t_stat = []
-all_p_val = []
-num_samples = []
-for idx in range(total_dims.size):
-    qual_idxs = np.intersect1d(np.where(np.isfinite(perfs['base'][:,idx]))[0],
-                               np.where(np.isfinite(perfs['firstord'][:,idx]))[0])
-    if qual_idxs.size > n_threshold:
-        if perf_metric == 'corr':
-            orig_t_stat, orig_p_val = ttest_ind(perfs['base'][qual_idxs,idx], perfs['firstord'][qual_idxs,idx],
-                                                equal_var=False)
-        elif perf_metric == 'dist':
-            orig_t_stat, orig_p_val = ttest_ind(perfs['firstord'][qual_idxs,idx], perfs['base'][qual_idxs,idx],
-                                                equal_var=False)
+if bootstrap is not None:
+    #Run a student's t-test, where...
+    #   for correlation, Ho: firstord >= base and Ha: firstord < base
+    #   for distance, Ho: base >= firstord and Ha: base < firstord
+    all_t_stat = []
+    all_p_val = []
+    num_samples = []
+    for idx in range(total_dims.size):
+        qual_idxs = np.intersect1d(np.where(np.isfinite(perfs['base'][:,idx]))[0],
+                                   np.where(np.isfinite(perfs['firstord'][:,idx]))[0])
+        if qual_idxs.size > n_threshold:
+            if perf_metric == 'corr':
+                orig_t_stat, orig_p_val = ttest_ind(perfs['base'][qual_idxs,idx], perfs['firstord'][qual_idxs,idx],
+                                                    equal_var=False)
+            elif perf_metric == 'dist':
+                orig_t_stat, orig_p_val = ttest_ind(perfs['firstord'][qual_idxs,idx], perfs['base'][qual_idxs,idx],
+                                                    equal_var=False)
+            else:
+                raise Exception('perf_metric must either be "corr" or "dist".')
+            all_t_stat.append(orig_t_stat)
+            all_p_val.append(orig_p_val / 2.)
+            num_samples.append(qual_idxs.size)
         else:
-            raise Exception('perf_metric must either be "corr" or "dist".')
-        all_t_stat.append(orig_t_stat)
-        all_p_val.append(orig_p_val / 2.)
-        num_samples.append(qual_idxs.size)
-    else:
-        all_t_stat.append(np.nan)
-        all_p_val.append(np.nan)
-        num_samples.append(0)
-all_t_stat = np.array(all_t_stat)
-all_p_val = np.array(all_p_val)
-sig_idxs = np.where(np.isfinite(all_t_stat))[0]
-sig_idxs = np.array([sig_idx for sig_idx in sig_idxs if all_t_stat[sig_idx] > 0. and all_p_val[sig_idx] < 0.05])
-print('Performance for the base model was significantly better than that of the first-order connectivity model for the '
-      'following dimensions:')
-for sig_idx in sig_idxs:
-    print(perf_eval_dim + ' ' + str(total_dims[sig_idx]) +
-          ': t-statistic {:.3f}, p-value {:.3f}'.format(all_t_stat[sig_idx], all_p_val[sig_idx]))
+            all_t_stat.append(np.nan)
+            all_p_val.append(np.nan)
+            num_samples.append(0)
+    all_t_stat = np.array(all_t_stat)
+    all_p_val = np.array(all_p_val)
+    sig_idxs = np.where(np.isfinite(all_t_stat))[0]
+    sig_idxs = np.array([sig_idx for sig_idx in sig_idxs if all_t_stat[sig_idx] > 0. and all_p_val[sig_idx] < 0.05])
+    print('Performance for the base model was significantly better than that of the first-order connectivity model for the '
+          'following dimensions:')
+    for sig_idx in sig_idxs:
+        print(perf_eval_dim + ' ' + str(total_dims[sig_idx]) +
+              ': t-statistic {:.3f}, p-value {:.3f}'.format(all_t_stat[sig_idx], all_p_val[sig_idx]))
 
 #Plot 1st order connectivity vs. base model
 plt.figure()
@@ -191,15 +195,9 @@ for conn_config in [('base', ax1), ('firstord', ax2)]:
                                    perfs[conn_config[0]])
     else:
         # plot the shaded range of the confidence intervals
-        conn_config[1].errorbar(range(plot_params[conn_config[0]]['mean'].size), plot_params[conn_config[0]]['mean'],
+        conn_config[1].errorbar(total_dims, plot_params[conn_config[0]]['mean'],
                                 yerr=[plot_params[conn_config[0]]['err'][0],
                                       plot_params[conn_config[0]]['err'][1]], fmt='o')
-        """
-        conn_config[1].fill_between(range(plot_params[conn_config[0]]['mean'].size),
-                                    plot_params[conn_config[0]]['err'][1],
-                                    plot_params[conn_config[0]]['err'][0], alpha=.5)
-        conn_config[1].scatter(plot_params[conn_config[0]]['mean'])
-        """
     conn_config[1].set_xlabel(perf_eval_dim)
     conn_config[1].set_ylabel(perf_metric + label)
     conn_config[1].set_title(perf_metric + label + ' across ' + perf_eval_dim + ' for ' + conn_config[0] + ' model')
@@ -215,16 +213,38 @@ for conn_type in conn_types:
             plt.scatter(np.array([total_dim for total_dim in total_dims if total_dim in dims[conn_type]]),
                         perfs[conn_type], label=conn_type + ' model')
     else:
-        plt.errorbar(range(plot_params[conn_type]['mean'].size), plot_params[conn_type]['mean'],
+        plt.errorbar(total_dims, plot_params[conn_type]['mean'],
                      yerr=[plot_params[conn_type]['err'][0], plot_params[conn_type]['err'][1]],
                      label=conn_type + ' model', fmt='o')
-        """
-        plt.fill_between(range(plot_params[conn_type]['mean'].size), plot_params[conn_type]['err'][1],
-                         plot_params[conn_type]['err'][0], alpha=.5)
-        plt.scatter(plot_params[conn_type]['mean'], label=conn_type + ' model')
-        """
 plt.xlabel(perf_eval_dim)
 plt.ylabel(perf_metric + label)
 plt.title(perf_metric + label + ' across ' + perf_eval_dim)
 plt.legend()
 plt.show()
+
+
+####################
+### Save Results ###
+####################
+if output_file is not None:
+    with h5py.File(output_file, 'w') as f:
+        f.create_dataset('sig dim idxs', data=sig_idxs)
+        if type(total_dims[0]) == str:
+            f.attrs['total dims'] = [a.encode('utf8') for a in list(total_dims)] # necessary because h5py cannot handle
+                                                            # unicode; will need to decode this back to unicode later
+        else:
+            f.attrs['total dims'] = total_dims
+        f.create_dataset('t stats', data=all_t_stat)
+        f.create_dataset('p vals', data=all_p_val)
+        c_val_group = f.create_group('c values')
+        pred_group = f.create_group('predictions')
+        perf_group = f.create_group('performance scores')
+        plot_params_group = f.create_group('plotting parameters')
+        for conn_type in conn_types:
+            c_val_group.create_dataset(conn_type, data=c_values[conn_type])
+            pred_group.create_dataset(conn_type, data=predicts[conn_type])
+            perf_group.create_dataset(conn_type, data=perfs[conn_type])
+            plot_params_subgrp = plot_params_group.create_group(conn_type)
+            plot_params_subgrp.create_dataset('mean', data=plot_params[conn_type]['mean'])
+            plot_params_subgrp.create_dataset('neg err', data=plot_params[conn_type]['err'][0])
+            plot_params_subgrp.create_dataset('pos err', data=plot_params[conn_type]['err'][1])

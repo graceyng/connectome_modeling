@@ -22,13 +22,15 @@ def make_Xo(seed_region, regions):
     Xo[np.where(regions == seed_region)[0]] = 1.
     return Xo
 
-def get_L_out(W):
+def get_L_out(W, normalize=True):
     """
     Compute the out-degree Laplacian matrix.
     :param W (ndarray): the weighted adjacency matrix
     :return: L_out (ndarray): the weighted out-degree Laplacian matrix
     """
     np.fill_diagonal(W, 0.) # zero out the diagonal since regions should not be connected to themselves
+    if normalize:
+        W = W / max(np.linalg.eigvals(W).real)
     out_deg = np.sum(W, axis=1)
     return np.diag(out_deg) - W
 
@@ -54,7 +56,7 @@ def get_perf(predicted, actual, perf_metric, log_shift="shift"):
     if perf_metric == 'corr':
         # need a minimum of three points to calculate a meaningful Pearson correlation, and the Pearson correlation is
         # undefined if the std dev of either dataset is 0
-        if predicted.size <=2:
+        if predicted.size < 3:
             return np.nan
         elif np.std(predicted) == 0. or np.std(actual) == 0.:
             return np.nan
@@ -77,8 +79,8 @@ def predict(Xo, L_out, c, time):
     """
     return np.matmul(expm(-L_out*c*time), Xo)
 
-def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metric, perf_eval_dim, log_shift="no shift",
-        do_linregress=True, plot=False, save=None):
+def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metric, perf_eval_dim,
+        log_shift="no shift", do_linregress=True, plot=False, save=None):
     """
 
     :param Xo:

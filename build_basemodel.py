@@ -13,20 +13,20 @@ process_path_data_file = 'process_path_data.hdf5'
 perf_metric = 'corr' # 'corr' or 'dist'
 perf_eval_dim = 'times' #'times' or 'regions'; the dimension along which performance is evaluated
 log_shift = "no shift" #'no shift' or 'shift' or 'no log'
-do_linregress = True
+do_linregress = False
 group_list = ['NTG'] # list of groups to consider, e.g. ['G20', 'NTG'] or 'all'
 seed_region = 'R CPu'
 c_range_type = 'lin' #'lin' or 'log'
 # the range of c values that will be tested to find the best-fitting model. Note that if the range type is 'log',
 # then these values will be used for  10^x
-c_range = (0.001, 10.)
+c_range = (0.01, 10.)
 #c_range = (-5., 1.)
 num_c = 100 # the number of c values to test
 verbose = True
 plot = True
 cluster_analysis = 'plot clusters only' #'check silhouettes', 'plot clusters only', 'plot clusters and timecourses', 'None'
 n_clusters = 3 #get this value by finding the cluster number with the maximum silhouette value
-cluster_to_analyze = 0
+cluster_to_analyze = 1
 
 #####
 # Load Data from Files
@@ -72,7 +72,6 @@ for group in mean_data:
     all_c, all_perf, all_predicts, dims, best_c, best_perf, best_predict, best_c_per_ctgry, linregress_params = \
         mdl_fxns.fit(Xo, L_out, times, regions, np.array(mean_data[group]), c_range_type, c_range, num_c, perf_metric,
                      perf_eval_dim, log_shift, do_linregress, plot=True)
-    
     if cluster_analysis == 'check silhouettes':
         mdl_fxns.silhouette_cluster_bestperf_bestc(perf_eval_dim, all_c, all_perf, perf_metric)
     elif cluster_analysis == 'plot clusters only' and all_perf.shape[0] >= n_clusters:
@@ -88,6 +87,7 @@ for group in mean_data:
             plot_fxns.plot_predict_vs_actual_timecourse(times, regions, region_to_plot, np.array(mean_data[group]),
                                                         mdl_fxns.predict, Xo, L_out, points[idx][0], points[idx][1],
                                                         log_shift=log_shift)
+
     c[group] = best_c
     perf[group] = best_perf
     predicts[group] = best_predict
@@ -97,6 +97,8 @@ for group in mean_data:
         print('Best performance score (', perf_metric, '): ', best_perf)
         print('Best c values for each category: ', best_c_per_ctgry)
 
+    """
     plot_fxns.plot_predict_vs_actual_timecourse(times, regions, seed_region, np.array(mean_data[group]),
                                                 mdl_fxns.predict, Xo, L_out, best_c, best_perf, log_shift=log_shift,
                                                 linregress_params=linregress_params)
+    """
