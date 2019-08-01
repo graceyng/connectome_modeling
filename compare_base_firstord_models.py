@@ -19,7 +19,7 @@ bootstrap = 50 # None or integer of the number of bootstrapped samples to genera
 n_threshold = 1
 perf_eval_dim = 'times' #'times' or 'regions'; the dimension along which performance is evaluated
 log_shift = "no shift" #'no shift' or 'shift' or 'no log'
-group = 'NTG' # list of groups to consider, e.g. ['G20', 'NTG'] or 'all'
+group = 'NTG' # group to consider
 seed_region = 'R CPu'
 c_params = {'base': {'c range type': 'lin', 'c range': (0.001, 10.), 'num c': 100},
             'firstord': {'c range type': 'log', 'c range': (-5., 1.), 'num c': 100}}
@@ -27,9 +27,6 @@ do_linregress = False
 verbose = True
 plot = True
 
-cluster_analysis = 'check silhouettes' #'check silhouettes', 'plot clusters only', 'plot clusters and timecourses', 'None'
-n_clusters = 3 #get this value by finding the cluster number with the maximum silhouette value
-cluster_to_analyze = 0
 
 #####
 # Load Data from Files

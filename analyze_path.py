@@ -1,7 +1,9 @@
 import h5py
+import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_samples, silhouette_score
 
@@ -10,7 +12,9 @@ from sklearn.metrics import silhouette_samples, silhouette_score
 ####################
 process_path_data_file = 'process_path_data.hdf5'
 connectome_file = 'W.hdf5'
+snca_file = 'Data83018/SncaExpression.csv'
 group_list = ['NTG']
+seed_region = 'R CPu'
 
 def compute_percent_change_path(group_data):
     differences = []
@@ -85,6 +89,31 @@ def plot_silhouette_clusters(points, n_range=list(range(2,8))):
                      fontsize=14, fontweight='bold')
     plt.show()
 
+def plot_connectivity_str_by_path(W, path_data, snca_data, times, regions, seed_region):
+    seed_idx = np.where(regions == seed_region)[0]
+    sort_order = np.argsort(path_data, axis=1)
+    for t, time in enumerate(times):
+        labels = regions[sort_order[t]]
+        conn_str_values = W[:, seed_idx][sort_order[t]]
+        snca_values = snca_data[sort_order[t]].reshape(labels.size,1)
+        fig, axes = plt.subplots(3, 1)
+        axes[0].set_title('Time Point ' + str(time))
+        plot_mats = (path_data[t].reshape(labels.size,1), conn_str_values, snca_values)
+        names = ('Pathology', 'Connectivity Strength', 'a-Synuclein Expression')
+        cmap_list = ('Blues', 'Greens', 'Reds')
+        for i in range(len(axes)):
+            ax = axes[i]
+            img = ax.matshow(plot_mats[i], cmap=plt.get_cmap(cmap_list[i]))
+            pos = list(ax.get_position().bounds)
+            x_text = pos[0] - 0.01
+            y_text = pos[1] + pos[3]/2.
+            fig.text(x_text, y_text, names[i], va='center', ha='right')
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.05)
+            fig.colorbar(img, cax=cax)
+        plt.xticks(list(range(labels.size)), labels, rotation=90, fontsize=8)
+        plt.show()
+
 process_path_data = {}
 with h5py.File(process_path_data_file, 'r') as f:
     for group in f.keys():
@@ -97,9 +126,25 @@ with h5py.File(connectome_file, 'r') as f:
     ipsi_regions = f['W'].attrs['Ipsi_Regions']
     contra_regions = f['W'].attrs['Contra_Regions']
 
+times = np.array(list(process_path_data[group].keys()))
+
 # create a vector of the names of all the regions of interest -- first, with the right-sided regions, and then the
 # left-sided regions
 regions = np.concatenate((np.add('R ', ipsi_regions), np.add('L ', contra_regions)))
+
+snca_df = pd.read_csv(snca_file, header=None)
+snca_regions = snca_df.iloc[:,0].values
+snca_data = snca_df.iloc[:,1].values
+for i, snca_region in enumerate(snca_regions):
+    if snca_region[0] == 'i':
+        snca_regions[i] = 'R ' + snca_region[1:]
+    elif snca_region[0] == 'c':
+        snca_regions[i] = 'L ' + snca_region[1:]
+
+# indices to sort the elements of the Snca expression data (for ipsilateral and contralateral regions) to have the same
+# order (by region) as the connectivity matrix
+sort_snca_idxs = np.argsort(snca_regions)[np.array([sorted(regions).index(x) for x in regions])]
+sort_snca_data = snca_data[sort_snca_idxs]
 
 # compute the mean of the pathology data across mice for each group and time point
 mean_data = {}
@@ -107,6 +152,8 @@ for group in process_path_data:
     mean_data[group] = []
     for time in process_path_data[group]:
         mean_data[group].append(np.nanmean(process_path_data[group][time], axis=0))
-    points = compute_percent_change_path(np.array(mean_data[group]))
-    plot_silhouette_clusters(points)
+    #points = compute_percent_change_path(np.array(mean_data[group]))
+    #plot_silhouette_clusters(points)
+
+plot_connectivity_str_by_path(W, np.array(mean_data[group]), sort_snca_data, times, regions, seed_region)
 
