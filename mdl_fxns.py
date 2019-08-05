@@ -22,6 +22,11 @@ def make_Xo(seed_region, regions):
     Xo[np.where(regions == seed_region)[0]] = 1.
     return Xo
 
+def get_norm_W(W):
+    np.fill_diagonal(W, 0.)
+    W = W / max(np.linalg.eigvals(W).real)
+    return W - np.identity(W.shape[0])
+
 def get_L_out(W, normalize=True):
     """
     Compute the out-degree Laplacian matrix.

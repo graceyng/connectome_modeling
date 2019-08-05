@@ -10,6 +10,7 @@ __author__ = 'Grace Ng'
 # Parameters
 #####
 connectome_file = 'W.hdf5'
+create_matrix_func = mdl_fxns.get_norm_W
 process_path_data_file = 'process_path_data.hdf5'
 perf_metric = 'corr'
 perf_eval_dim = 'times'
@@ -93,20 +94,24 @@ def walk_len_fit(Xo, L_out, times, data, c_range_type, c_range, num_c, perf_metr
         single_qual_idxs = np.where(np.sum(np.isfinite(single_walk_perfs[:,w,:]), axis=0)
                                     > single_walk_perfs.shape[0] / 2.)[0] #only consider c values for which at least half
                                                                 #of the performance evaluations are valid (i.e. not nan)
-        gen_single_walk_perf = np.nanmean(single_walk_perfs[:,w,single_qual_idxs], axis=0)  # vector with the mean
-                                                                            # performance score for each of the c values
-        cum_qual_idxs = np.where(np.sum(np.isfinite(cum_walk_perfs[:, w, :]), axis=0)
-                                    > cum_walk_perfs.shape[0] / 2.)[0]
-        gen_cum_walk_perf = np.nanmean(cum_walk_perfs[:, w, cum_qual_idxs], axis=0)
-        # if performance metric is correlation, find the c value that gives the highest mean performance score
-
-        if perf_metric == 'corr':
+        if single_qual_idxs.size == 0:
+            best_single_walk_perfs.append(np.nan)
+            best_single_walk_c_idx.append(np.nan)
+        else:
+            gen_single_walk_perf = np.nanmean(single_walk_perfs[:,w,single_qual_idxs], axis=0)  # vector with the mean
+                                                                                # performance score for each of the c values
             best_single_walk_perfs.append(np.nanmax(gen_single_walk_perf))
             best_single_walk_c_idx.append(single_qual_idxs[np.nanargmax(gen_single_walk_perf)])
+        cum_qual_idxs = np.where(np.sum(np.isfinite(cum_walk_perfs[:, w, :]), axis=0)
+                                    > cum_walk_perfs.shape[0] / 2.)[0]
+        if cum_qual_idxs.size == 0:
+            best_cum_walk_perfs.append(np.nan)
+            best_cum_walk_c_idx.append(np.nan)
+        else:
+            gen_cum_walk_perf = np.nanmean(cum_walk_perfs[:, w, cum_qual_idxs], axis=0)
+            # if performance metric is correlation, find the c value that gives the highest mean performance score
             best_cum_walk_perfs.append(np.nanmax(gen_cum_walk_perf))
             best_cum_walk_c_idx.append(cum_qual_idxs[np.nanargmax(gen_cum_walk_perf)])
-        else:
-            raise Exception('perf_metric must either be "corr".')
     return single_walk_perfs, best_single_walk_perfs, best_single_walk_c_idx, cum_walk_perfs, best_cum_walk_perfs, \
            best_cum_walk_c_idx
 
@@ -138,7 +143,7 @@ times = np.array(times)
 mean_data = np.array(mean_data)
 
 Xo = mdl_fxns.make_Xo(seed_region, regions)
-L_out = mdl_fxns.get_L_out(W) # generate weighted out-degree Laplacian matrix
+L_out = create_matrix_func(W) # generate weighted out-degree Laplacian matrix
 
 single_walk_perfs, best_single_walk_perfs, best_single_walk_c_idx, cum_walk_perfs, best_cum_walk_perfs, \
 best_cum_walk_c_idx = walk_len_fit(Xo, L_out, times, mean_data, c_range_type, c_range, num_c, perf_metric,
@@ -160,7 +165,9 @@ plt.show()
 plt.figure()
 plt.plot(list(range(1, max_walk_len+1)), best_cum_walk_perfs, marker='.', label='average')
 for t in range(times.size):
-    plt.plot(list(range(1, max_walk_len+1)), [cum_walk_perfs[t,w,best_cum_walk_c_idx[w]] for w in range(max_walk_len)],
+    qual_idxs = np.where(np.isfinite(best_cum_walk_c_idx))
+    cum_walk_perfs_to_plot = [cum_walk_perfs[t,w,best_cum_walk_c_idx[w]] for w in list(range(max_walk_len))[qual_idxs]]
+    plt.plot(list(range(1, max_walk_len+1))[qual_idxs], cum_walk_perfs_to_plot,
              marker='.', label='time ' + str(times[t]))
 plt.xticks(list(range(1, max_walk_len+1)))
 plt.xlabel('Walk Length (Cumulative)')
