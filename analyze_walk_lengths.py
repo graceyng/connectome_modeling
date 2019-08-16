@@ -1,6 +1,7 @@
 import numpy as np
 import math
 import h5py
+from scipy.linalg import expm
 import mdl_fxns
 import matplotlib.pyplot as plt
 
@@ -25,14 +26,37 @@ c_range = (0.01, 10.)
 num_c = 100 # the number of c values to test
 
 
-def walk_len_predict(Xo, L_out, time, walk_len):
-    return np.matmul((np.linalg.matrix_power(-L_out, walk_len)) * time**walk_len, Xo)
+def single_walk_predict(Xo, A, seed_idx, c, time, walk_len):
+    int_mask = np.zeros(A.shape)
+    int_mask[:, seed_idx] = 1
+    mask = ~np.ma.make_mask(int_mask)
+    new_A = np.linalg.matrix_power(A, walk_len)
+    np.putmask(new_A, mask, 0.)
+    L_out = mdl_fxns.get_L_out(new_A, normalize=False)
+    return np.matmul(expm(L_out) * c * time, Xo)
 
-def walk_len_fit(Xo, L_out, times, data, c_range_type, c_range, num_c, perf_metric, perf_eval_dim, log_shift="no shift"):
+
+def single_walk_predict_alt(Xo, A, seed_idx, c, time, walk_len):
+    int_mask = np.zeros(A.shape)
+    int_mask[:, seed_idx] = 1
+    mask = ~np.ma.make_mask(int_mask)
+    new_A = np.linalg.matrix_power(A, walk_len)
+    np.putmask(new_A, mask, 0.)
+    return np.matmul(expm(new_A) * c * time, Xo)
+    # new_A = np.linalg.matrix_power(A, walk_len)
+    # return np.multiply(new_A[:, seed_idx].reshape(Xo.size) * time**walk_len * c, Xo)
+
+
+def walk_len_predict(Xo, A, time, walk_len):
+    return np.matmul((np.linalg.matrix_power(A, walk_len)) * time ** walk_len, Xo)
+
+
+def walk_len_fit(Xo, A, times, data, c_range_type, c_range, num_c, perf_metric, perf_eval_dim, seed_idx,
+                 log_shift="no shift", single_walk_predict_func=single_walk_predict):
     """
 
     :param Xo:
-    :param L_out:
+    :param A:
     :param time:
     :param data (ndarray):
     :param perf_metric:
@@ -50,14 +74,22 @@ def walk_len_fit(Xo, L_out, times, data, c_range_type, c_range, num_c, perf_metr
         all_c = np.logspace(c_range[0], c_range[1], num=num_c)
     raw_predicts, single_walk_predicts, cum_walk_predicts = [], [], []
     for walk_len in range(1, max_walk_len+1):
-        raw_predict = np.array([walk_len_predict(Xo, L_out, time, walk_len) for time in times])
-        single_walk_predicts.append(np.tile(raw_predict, (all_c.size, 1, 1)) * all_c.reshape(all_c.size, 1, 1))
+        single_walk_len_predict = []
+        for time in times:
+            single_walk_len_predict.append(np.array([single_walk_predict_func(Xo, A, seed_idx, c, time, walk_len)
+                                                     for c in all_c]))
+        single_walk_predicts.append(single_walk_len_predict)
+
+        raw_predict = np.array([walk_len_predict(Xo, A, time, walk_len) for time in times])
+        this_walk_predicts = np.tile(raw_predict, (all_c.size, 1, 1)) * all_c.reshape(all_c.size, 1, 1)
         if walk_len == 1:
-            cum_walk_predict = single_walk_predicts[0]
+            cum_walk_predict = this_walk_predicts
         else:
-            cum_walk_predict = cum_walk_predict[-1] + math.factorial(walk_len) * single_walk_predicts[-1]
+            cum_walk_predict = cum_walk_predict[-1] + math.factorial(walk_len) * this_walk_predicts
         cum_walk_predicts.append(cum_walk_predict)
     single_walk_predicts = np.array(single_walk_predicts)
+    single_walk_predicts = single_walk_predicts.reshape(single_walk_predicts.shape[0], single_walk_predicts.shape[2],
+                                                        single_walk_predicts.shape[1], single_walk_predicts.shape[3])
     cum_walk_predicts = np.array(cum_walk_predicts)
 
     # func used to find the indices of regions where pathology data is not 0 or nan so that we can take the log afterward
@@ -92,7 +124,8 @@ def walk_len_fit(Xo, L_out, times, data, c_range_type, c_range, num_c, perf_metr
     best_single_walk_c_idx, best_cum_walk_c_idx = [], []
     for w in range(max_walk_len):
         single_qual_idxs = np.where(np.sum(np.isfinite(single_walk_perfs[:,w,:]), axis=0)
-                                    > single_walk_perfs.shape[0] / 2.)[0] #only consider c values for which at least half
+                                    > 0)[
+            0]  # single_walk_perfs.shape[0] / 2. #only consider c values for which at least half
                                                                 #of the performance evaluations are valid (i.e. not nan)
         if single_qual_idxs.size == 0:
             best_single_walk_perfs.append(np.nan)
@@ -143,15 +176,18 @@ times = np.array(times)
 mean_data = np.array(mean_data)
 
 Xo = mdl_fxns.make_Xo(seed_region, regions)
-L_out = create_matrix_func(W) # generate weighted out-degree Laplacian matrix
+A = create_matrix_func(W)  # generate adjacency matrix
+seed_idx = np.where(regions == seed_region)[0]
 
 single_walk_perfs, best_single_walk_perfs, best_single_walk_c_idx, cum_walk_perfs, best_cum_walk_perfs, \
-best_cum_walk_c_idx = walk_len_fit(Xo, L_out, times, mean_data, c_range_type, c_range, num_c, perf_metric,
-                                   perf_eval_dim, log_shift)
+best_cum_walk_c_idx = walk_len_fit(Xo, W, times, mean_data, c_range_type, c_range, num_c, perf_metric,
+                                   perf_eval_dim, seed_idx, log_shift, single_walk_predict_func=single_walk_predict)
 
 plt.figure()
 plt.plot(list(range(1, max_walk_len+1)), best_single_walk_perfs, marker='.', label='average')
 for t in range(times.size):
+    if np.any(np.isnan(best_single_walk_c_idx)):
+        raise Exception('Performance scores for single walks were invalid.')
     plt.plot(list(range(1, max_walk_len+1)),
              [single_walk_perfs[t,w,best_single_walk_c_idx[w]] for w in range(max_walk_len)], marker='.',
              label='time ' + str(times[t]))
@@ -165,6 +201,8 @@ plt.show()
 plt.figure()
 plt.plot(list(range(1, max_walk_len+1)), best_cum_walk_perfs, marker='.', label='average')
 for t in range(times.size):
+    if np.any(np.isnan(best_cum_walk_c_idx)):
+        raise Exception('Performance scores for cumulative walks were invalid.')
     qual_idxs = np.where(np.isfinite(best_cum_walk_c_idx))
     cum_walk_perfs_to_plot = [cum_walk_perfs[t,w,best_cum_walk_c_idx[w]] for w in list(range(max_walk_len))[qual_idxs]]
     plt.plot(list(range(1, max_walk_len+1))[qual_idxs], cum_walk_perfs_to_plot,

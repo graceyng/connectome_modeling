@@ -31,13 +31,13 @@ def get_L_out(W, normalize=True):
     """
     Compute the out-degree Laplacian matrix.
     :param W (ndarray): the weighted adjacency matrix
-    :return: L_out (ndarray): the weighted out-degree Laplacian matrix
+    :return: -L_out (ndarray): the weighted out-degree Laplacian matrix
     """
     np.fill_diagonal(W, 0.) # zero out the diagonal since regions should not be connected to themselves
     if normalize:
         W = W / max(np.linalg.eigvals(W).real)
     out_deg = np.sum(W, axis=1)
-    return np.diag(out_deg) - W
+    return -1. * (np.diag(out_deg) - W)
 
 def get_perf(predicted, actual, perf_metric, log_shift="shift"):
     """
@@ -53,11 +53,11 @@ def get_perf(predicted, actual, perf_metric, log_shift="shift"):
             actual = actual + 1.
             predicted = predicted + 1.
         func = lambda x: x > 0. and not np.isnan(x)
-        qual_idxs = np.where(np.vectorize(func)(predicted))[0]
+        qual_idxs = np.intersect1d(np.where(np.vectorize(func)(predicted))[0], np.where(np.vectorize(func)(actual))[0])
         if qual_idxs.size < 2:
             return np.nan
-        actual = np.log(actual[qual_idxs])
-        predicted = np.log(predicted[qual_idxs])
+        actual = np.log10(actual[qual_idxs])
+        predicted = np.log10(predicted[qual_idxs])
     if perf_metric == 'corr':
         # need a minimum of three points to calculate a meaningful Pearson correlation, and the Pearson correlation is
         # undefined if the std dev of either dataset is 0
@@ -73,60 +73,46 @@ def get_perf(predicted, actual, perf_metric, log_shift="shift"):
     else:
         raise Exception('perf_metric should either be "corr" or "dist".')
 
-def predict(Xo, L_out, c, time):
+
+def predict(Xo, A, c, time):
     """
 
     :param Xo:
-    :param L_out:
+    :param A:
     :param c:
     :param time:
     :return:
     """
-    return np.matmul(expm(-L_out*c*time), Xo)
+    return np.matmul(expm(A * c * time), Xo)
 
-def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metric, perf_eval_dim,
-        log_shift="no shift", do_linregress=True, plot=False, save=None):
-    """
 
-    :param Xo:
-    :param L_out:
-    :param time:
-    :param data (ndarray):
-    :param perf_metric:
-    :param c_range_type (str)
-    :param c_range (tuple of int):
-    :param num_c (int):
-    :param qual_idxs:
-    :param save: tuple, with save[0] being the string of the filename and save[1] being a string with additional
-                            information to be stored in the file's attributes, e.g. 'NTG' (the group name)
-    :return:
-    """
-    if c_range_type == 'lin':
-        all_c = np.linspace(c_range[0], c_range[1], num=num_c) # array with all the values of c being tested
-    elif c_range_type == 'log':
-        all_c = np.logspace(c_range[0], c_range[1], num=num_c)
-    all_perf = [] # stores the performance scores at each time point for each value of c
-    all_predicts = [] # stores the predicted pathology values at each time point for each value of c
+def get_all_predicts(Xo, A, times, data, all_c, num_c, log_shift, do_linregress):
+    all_predicts = []  # stores the predicted pathology values at each time point for each value of c
     for i, time in enumerate(times):
         # propagate the model according to the tested values of c to generate predicted pathology values
-        all_predicts.append(np.array([predict(Xo, L_out, c, time) for c in all_c]))
+        all_predicts.append(np.array([predict(Xo, A, c, time) for c in all_c]))
     all_predicts = np.array(all_predicts)
     # func used to find the indices of regions where pathology data is not 0 or nan so that we can take the log afterward
     if log_shift == "no shift":
         func = lambda x: x > 0. and not np.isnan(x)
-        qual_mat = np.vectorize(func)(data) # matrix has True if element satisfies the above conditions, and False otherwise
+        qual_mat = np.vectorize(func)(data)  # matrix has True if element satisfies the above conditions, and
+        # False otherwise
     else:
         qual_mat = np.ones((data.shape[0], data.shape[1]), dtype=bool)
     if do_linregress:
         swapped_predicts = np.swapaxes(all_predicts, 1, 2)
         flat_predicts = swapped_predicts[qual_mat].flatten('F')
-        flat_data = np.tile(data[qual_mat],num_c)
+        flat_data = np.tile(data[qual_mat], num_c)
         slope, intercept, r_value, p_value, std_err = linregress(flat_predicts, flat_data)
         all_predicts = slope * all_predicts + intercept
         linregress_params = [slope, intercept]
     else:
         linregress_params = None
+    return all_predicts, linregress_params, qual_mat
 
+
+def get_all_perfs(all_predicts, times, regions, data, qual_mat, all_c, perf_metric, perf_eval_dim, log_shift, plot):
+    all_perf = []  # stores the performance scores at each time point for each value of c
     # evaluate model performance according to the performance metric
     dims = [] # dimensions along which performance is evaluated
     perf_idxs = []
@@ -163,6 +149,37 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
         else:
             use_log = False
         plot_fxns.plot_perf_vs_c(perf_eval_dim, dims, all_c, all_perf, perf_metric, use_log=use_log)
+    return all_perf, gen_perf, qual_idxs, perf_idxs, dims, use_log
+
+
+def fit(Xo, A, times, regions, data, c_range_type, c_range, num_c, perf_metric, perf_eval_dim,
+        log_shift="no shift", do_linregress=True, plot=False, save=None):
+    """
+
+    :param Xo:
+    :param A:
+    :param time:
+    :param data (ndarray):
+    :param perf_metric:
+    :param c_range_type (str)
+    :param c_range (tuple of int):
+    :param num_c (int):
+    :param qual_idxs:
+    :param save: tuple, with save[0] being the string of the filename and save[1] being a string with additional
+                            information to be stored in the file's attributes, e.g. 'NTG' (the group name)
+    :return:
+    """
+    if c_range_type == 'lin':
+        all_c = np.linspace(c_range[0], c_range[1], num=num_c)  # array with all the values of c being tested
+    elif c_range_type == 'log':
+        all_c = np.logspace(c_range[0], c_range[1], num=num_c)
+    all_predicts, linregress_params, qual_mat = get_all_predicts(Xo, A, times, data, all_c, num_c, log_shift,
+                                                                 do_linregress)
+    all_perf, gen_perf, qual_idxs, perf_idxs, dims, use_log = get_all_perfs(all_predicts, times, regions, data,
+                                                                            qual_mat,
+                                                                            all_c, perf_metric, perf_eval_dim,
+                                                                            log_shift,
+                                                                            plot)
 
     # if performance metric is correlation, find the c value that gives the highest mean performance score
     if perf_metric == 'corr':
@@ -185,9 +202,8 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
             all_idxs = np.array(range(len(regions)))
         else:
             raise Exception('perf_eval_dim must either be "times" or "regions".')
-        plot_fxns.plot_predict_vs_data(times, regions, all_idxs, best_predict, data, qual_mat, perf_eval_dim,
-                                       best_gen_c, log_shift, title='Evaluated by ' + perf_metric + ', averaged over ' +
-                                                                    perf_eval_dim + ', log ' + log_shift)
+        plot_fxns.plot_predict_vs_data(times, regions, all_idxs, best_predict, A, Xo, data, qual_mat, perf_eval_dim,
+                                       best_gen_c, log_shift)
         if len(perf_idxs) > 10:
             if perf_metric == "corr":
                 best_5_idxs = np.argpartition(np.array(all_perf)[:,best_c_idx], -5)[-5:]
@@ -201,14 +217,13 @@ def fit(Xo, L_out, times, regions, data, c_range_type, c_range, num_c, perf_metr
             plot_fxns.plot_perf_vs_c(perf_eval_dim, np.array(dims)[worst_5_idxs], all_c,
                                      np.array(all_perf)[worst_5_idxs],
                                      perf_metric, 'Performance in the 5 Worst Dimensions', use_log)
-            plot_fxns.plot_predict_vs_data(times, regions, np.array(perf_idxs)[best_5_idxs], best_predict,
-                                           data, qual_mat, perf_eval_dim, best_gen_c, log_shift,
-                                           title='5 Best Dimensions')
-            plot_fxns.plot_predict_vs_data(times, regions, worst_5_idxs, best_predict, data, qual_mat, perf_eval_dim,
-                                           best_gen_c, log_shift, title='5 Worst Dimensions')
+            plot_fxns.plot_predict_vs_data(times, regions, np.array(perf_idxs)[best_5_idxs], best_predict, A, Xo, data,
+                                           qual_mat, perf_eval_dim, best_gen_c, log_shift, title='5 Best Dimensions')
+            plot_fxns.plot_predict_vs_data(times, regions, np.array(dims)[worst_5_idxs], best_predict, A, Xo, data,
+                                           qual_mat, perf_eval_dim, best_gen_c, log_shift, title='5 Worst Dimensions')
             for idx in np.concatenate((best_5_idxs, worst_5_idxs)):
                 plot_fxns.plot_predict_vs_actual_timecourse(times, regions, np.array(dims)[idx], data, predict, Xo,
-                                                            L_out, best_gen_c, best_perf, log_shift=log_shift,
+                                                            A, best_gen_c, best_perf, log_shift=log_shift,
                                                             linregress_params=linregress_params)
 
     if save is not None:
